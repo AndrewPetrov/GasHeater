@@ -20,7 +20,7 @@
 // the value of the 'other' resistor
 #define SERIESRESISTOR 97000
 
-int loop_count = 0;
+//int loop_count = 0;
 
 #define lcd1Light DD3
 LiquidCrystal_I2C lcd(0x3F, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
@@ -149,7 +149,7 @@ void adjustTemperature() {
     currentServoState = down;
   }
 
-  if (currentTemp < (targetTemp - threshold) && servoAngle > maxAngle) {
+  else if (currentTemp < (targetTemp - threshold) && servoAngle > maxAngle) {
     int delta = 1;
     if ((currentTemp + threshold - targetTemp) < -2) {
       delta = 2;
@@ -177,6 +177,8 @@ void adjustTemperature() {
     previousTemp = currentTemp;
     servoAngle -= delta;
     currentServoState = up;
+  } else {
+    currentServoState = none;
   }
   servo.write(servoAngle);
 }
@@ -260,9 +262,9 @@ void watchdogSetup(void) {
   */
   // Enter Watchdog Configuration mode:
   WDTCSR |= (1 << WDCE) | (1 << WDE);
-  //  WDTCSR |= (1 << WDE);
+  //    WDTCSR |= (1 << WDE);
   // Set Watchdog settings:
-  WDTCSR = (1 << WDIE) | (1 << WDE) | (0 << WDP3) | (1 << WDP2) | (1 << WDP1) | (1 << WDP0);
+  WDTCSR = (0 << WDIE) | (1 << WDE) | (0 << WDP3) | (1 << WDP2) | (1 << WDP1) | (1 << WDP0);
   sei();
 }
 
@@ -299,7 +301,7 @@ void setup()
   servoAngle = startAngle;
   servo.write(servoAngle);
   lastActionTime = millis();
-  //   watchdogSetup();
+  watchdogSetup();
 }
 
 //ISR(WDT_vect) // Watchdog timer interrupt. {
@@ -309,8 +311,8 @@ void setup()
 
 void loop()
 {
-  //    loop_count++;
-  //    wdt_reset();
+  //  loop_count++;
+  wdt_reset();
 
   if ((millis() - lastActionTime > lcdSleepDelay) /*&& (currentLcdState == lcdWait || currentLcdState == lcdDown)*/) {
     if (lightDownThread.shouldRun()) {
@@ -418,7 +420,8 @@ void printToLcd1() {
     boiler = " OFF";
   }
   lcd.setCursor ( 0, 1 );        // go to the next line
-  lcd.print (String(currentTemp) + "    " + String(180 - servoAngle) + boiler);
+  //  lcd.print (String(currentTemp) + " "   " + String(180 - servoAngle) + boiler);
+  lcd.print (String(currentTemp) + " " + String(millis() / 1000 / 60 / 60)  + " " + String(180 - servoAngle) + boiler);
 }
 
 
