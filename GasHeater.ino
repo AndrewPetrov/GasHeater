@@ -195,6 +195,9 @@ void adjustTemperature() {
     currentSkip = 0;
   }
   servo.write(servoAngle);
+}
+
+
 bool checkIfNeedToSkip(int delta) {
   if (delta == 1) {
     currentFineAdjusting++;
@@ -330,7 +333,7 @@ void setup()
   servoAngle = minAngle;
   servo.write(servoAngle);
   delay(2000);
-    servoAngle = startAngle;
+  servoAngle = startAngle;
   servo.write(servoAngle);
   lastActionTime = millis();
   watchdogSetup();
@@ -439,7 +442,6 @@ void printToLcd1() {
 
   }
 
-  lcd.clear();
   switch (currentServoState) {
     case none:
       lcd.print(waitLeft + targetTempString + waitRight);
