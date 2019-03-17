@@ -3,7 +3,9 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <Thread.h>
+#include <EEPROM.h>
 #include <avr/wdt.h>
+
 
 // which analog pin to connect
 #define THERMISTORPIN A0
@@ -28,21 +30,22 @@ int lcdSleepDelay = 10000;
 int lcdLevel = 0;
 int maxLevel = 250;
 
+
 enum lcdState {
-  lcdWait,
-  lcdUp,
-  lcdDown
+    lcdWait,
+    lcdUp,
+    lcdDown
 };
 lcdState currentLcdState = lcdWait;
-
 
 
 const byte ROWS = 1; // Four rows
 const byte COLS = 4; // Three columns
 // Define the Keymap
 char keys[ROWS][COLS] = {
-  {'+', '-', 'B', 'A'}
+        {'+', '-', 'B', 'A'}
 };
+
 
 #define boilerPin DD2
 
@@ -53,9 +56,11 @@ unsigned long boilerOnTime;
 unsigned long boilerStartDelay = 12000;
 
 
-byte rowPins[ROWS] = { 8 };
-byte colPins[COLS] = { 9, 10, 11, 12 };
-Keypad kpd = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS );
+byte rowPins[ROWS] = {8};
+byte colPins[COLS] = {9, 10, 11, 12};
+Keypad kpd = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+
+void (*resetFunc)(void) = 0;
 
 Servo servo;
 int servoPin = 7;
@@ -71,10 +76,17 @@ const int maxFineAdjustingCount = 4;
 int currentFineAdjusting = 0;
 const int maxSkipCount = 5;
 int currentSkip = 0;
+
+// writting to EEPROM
+int shift = 0;
+int currentAngleAdress = shift;
+int isOnlineBeforeResetAdress = shift + 5;
+int targetTempAdress = shift + 10;
+
 enum servoState {
-  none,
-  up,
-  down
+    none,
+    up,
+    down
 };
 
 servoState currentServoState = none;
@@ -94,249 +106,262 @@ Thread lightUpThread = Thread();
 Thread lightDownThread = Thread();
 
 void lightUp() {
-  if (lcdLevel < maxLevel) {
-    currentLcdState = lcdUp;
-    lcdLevel += 2;
-  } else {
-    currentLcdState = lcdWait;
-  }
-  analogWrite(lcd1Light, lcdLevel);
+    if (lcdLevel < maxLevel) {
+        currentLcdState = lcdUp;
+        lcdLevel += 2;
+    } else {
+        currentLcdState = lcdWait;
+    }
+    analogWrite(lcd1Light, lcdLevel);
 }
 
 void lightDown() {
-  if (lcdLevel > 0) {
-    lcdLevel -= 1;
-    currentLcdState = lcdDown;
-  } else {
-    currentLcdState = lcdWait;
-  }
-  analogWrite(lcd1Light, lcdLevel);  // analogRead values go from 0 to 1023, analogWrite values from 0 to 255
+    if (lcdLevel > 0) {
+        lcdLevel -= 1;
+        currentLcdState = lcdDown;
+    } else {
+        currentLcdState = lcdWait;
+    }
+    analogWrite(lcd1Light, lcdLevel);  // analogRead values go from 0 to 1023, analogWrite values from 0 to 255
 }
 
 void adjustTemperature() {
-  if (millis() - boilerOnTime < boilerStartDelay) {
-    currentServoState = none;
-    currentFineAdjusting = 0;
-    currentSkip = 0;
+    int isOnlineBeforeReset = 0;
+    EEPROM.get(isOnlineBeforeResetAdress, isOnlineBeforeReset);
 
-    return;
-  }
-  isCycleSkipped = false;
-  if (currentTemp > (targetTemp + threshold) && servoAngle < minAngle) {
-    int delta = 1;
-    if ((currentTemp - threshold - targetTemp) > 2) {
-      delta = 2;
-    }
-    if ((currentTemp - threshold - targetTemp) > 4) {
-      delta = 3;
-    }
-    if ((currentTemp - threshold - targetTemp) > 6) {
-      delta = 4;
-    }
-    if ((currentTemp - threshold - targetTemp) > 9) {
-      delta = 5;
-    }
 
-    if (checkIfNeedToSkip(delta)) {
-      return;
-    }
+    if (millis() - boilerOnTime < boilerStartDelay && !isOnlineBeforeReset) {
+        currentServoState = none;
+        currentFineAdjusting = 0;
+        currentSkip = 0;
 
-    if (
-      (delta >= 3 && (previousTemp - currentTemp) >= 1.2) ||
-      (delta < 2 && (previousTemp - currentTemp) >= 0.3)
-    ) {
-      isCycleSkipped = true;
-      previousTemp = currentTemp;
-      return;
+        return;
+    }
+    isCycleSkipped = false;
+    if (currentTemp > (targetTemp + threshold) && servoAngle < minAngle) {
+        int delta = 1;
+        if ((currentTemp - threshold - targetTemp) > 2) {
+            delta = 2;
+        }
+        if ((currentTemp - threshold - targetTemp) > 4) {
+            delta = 3;
+        }
+        if ((currentTemp - threshold - targetTemp) > 6) {
+            delta = 4;
+        }
+        if ((currentTemp - threshold - targetTemp) > 9) {
+            delta = 5;
+        }
+
+        if (checkIfNeedToSkip(delta)) {
+            return;
+        }
+
+        if ((delta >= 3 && (previousTemp - currentTemp) >= 1.2) || (delta < 2 && (previousTemp - currentTemp) >= 0.3)) {
+            isCycleSkipped = true;
+            previousTemp = currentTemp;
+            return;
+        } else {
+            isCycleSkipped = false;
+        }
+        previousTemp = currentTemp;
+        Serial.println(-delta);
+        servoAngle += delta;
+        currentServoState = down;
+    } else if (currentTemp < (targetTemp - threshold) && servoAngle > maxAngle) {
+        int delta = 1;
+        if ((currentTemp + threshold - targetTemp) < -2) {
+            delta = 2;
+        }
+        if ((currentTemp + threshold - targetTemp) < -4) {
+            delta = 3;
+        }
+        if ((currentTemp + threshold - targetTemp) < -6) {
+            delta = 4;
+        }
+        if ((currentTemp + threshold - targetTemp) < -9) {
+            delta = 5;
+        }
+        if (checkIfNeedToSkip(delta)) {
+            return;
+        }
+
+        if (
+                (delta >= 3 && (previousTemp - currentTemp) <= -1.2) ||
+                        (delta < 2 && (previousTemp - currentTemp) <= -0.5)
+                ) {
+            isCycleSkipped = true;
+            previousTemp = currentTemp;
+            return;
+        } else {
+            isCycleSkipped = false;
+        }
+        previousTemp = currentTemp;
+        servoAngle -= delta;
+        Serial.println(delta);
+        currentServoState = up;
     } else {
-      isCycleSkipped = false;
-    }
-    previousTemp = currentTemp;
-    Serial.println(-delta);
-    servoAngle += delta;
-    currentServoState = down;
-  }
-
-  else if (currentTemp < (targetTemp - threshold) && servoAngle > maxAngle) {
-    int delta = 1;
-    if ((currentTemp + threshold - targetTemp) < -2) {
-      delta = 2;
-    }
-    if ((currentTemp + threshold - targetTemp) < -4) {
-      delta = 3;
-    }
-    if ((currentTemp + threshold - targetTemp) < -6) {
-      delta = 4;
-    }
-    if ((currentTemp + threshold - targetTemp) < -9) {
-      delta = 5;
-    }
-    if (checkIfNeedToSkip(delta)) {
-      return;
+        currentServoState = none;
+        currentFineAdjusting = 0;
+        currentSkip = 0;
     }
 
-    if (
-      (delta >= 3 && (previousTemp - currentTemp) <= -1.2) ||
-      (delta < 2 && (previousTemp - currentTemp) <= -0.5)
-    ) {
-      isCycleSkipped = true;
-      previousTemp = currentTemp;
-      return;
-    } else {
-      isCycleSkipped = false;
-    }
-    previousTemp = currentTemp;
-    servoAngle -= delta;
-    Serial.println(delta);
-    currentServoState = up;
-  } else {
-    currentServoState = none;
-    currentFineAdjusting = 0;
-    currentSkip = 0;
-  }
-  servo.write(servoAngle);
+    servo.write(servoAngle);
+    EEPROM.update(currentAngleAdress, servoAngle);
 }
 
-
 bool checkIfNeedToSkip(int delta) {
-  if (delta == 1) {
-    currentFineAdjusting++;
-  } else {
-    currentFineAdjusting = 0;
-  }
-
-  if (currentFineAdjusting > maxFineAdjustingCount) {
-    currentSkip++;
-    if (currentSkip >= maxSkipCount) {
-      currentSkip = 0;
-      currentFineAdjusting = 0;
-      return false;
+    if (delta == 1) {
+        currentFineAdjusting++;
+    } else {
+        currentFineAdjusting = 0;
     }
-    return true;
-  } else {
-    return false;
-  }
+
+    if (currentFineAdjusting > maxFineAdjustingCount) {
+        lcd.clear();
+        currentSkip++;
+        if (currentSkip >= maxSkipCount) {
+            currentSkip = 0;
+            currentFineAdjusting = 0;
+            return false;
+        }
+        return true;
+    } else {
+        return false;
+    }
 }
 
 void getTemperature() {
-  uint8_t i;
-  float average;
-  uint16_t samples[NUMSAMPLES];
+    uint8_t i;
+    float average;
+    uint16_t samples[NUMSAMPLES];
 
-  for (i = 0; i < NUMSAMPLES; i++) {
-    samples[i] = analogRead(THERMISTORPIN);
-    delay(3);
-  }
+    for (i = 0; i < NUMSAMPLES; i++) {
+        samples[i] = analogRead(THERMISTORPIN);
+        delay(3);
+    }
 
-  // average all the samples out
-  average = 0.0;
-  for (i = 0; i < NUMSAMPLES; i++) {
-    average += samples[i];
-  }
-  average /= NUMSAMPLES;
-  // TODO: add more diapasones
+    // average all the samples out
+    average = 0.0;
+    for (i = 0; i < NUMSAMPLES; i++) {
+        average += samples[i];
+    }
+    average /= NUMSAMPLES;
+    // TODO: add more diapasones
 
 
-  // 33 - 265
-  // 35 - 247
-  // 36 - 238
-  // 38 - 220
-  // 42 - 195
-  // 48 - 156
-  // 53 - 137
-  if (average <= 156 && average >= 137) {
-    currentTemp = map(average, 156, 137, 48 * 10.0, 53 * 10) / 10.0;
-  } else if (average <= 195) {
-    currentTemp = map(average, 195, 156, 42 * 10.0, 48 * 10) / 10.0;
-  } else if (average <= 220) {
-    currentTemp = map(average, 220, 195, 38 * 10.0, 42 * 10) / 10.0;
-  } else if (average <= 238) {
-    currentTemp = map(average, 238, 220, 36 * 10.0, 38 * 10) / 10.0;
-  } else if (average <= 247) {
-    currentTemp = map(average, 247, 238, 35 * 10.0, 36 * 10) / 10.0;
-  } else if (average <= 265) {
-    currentTemp = map(average, 265, 247, 33 * 10.0, 35 * 10) / 10.0;
-  } else {
-    currentTemp = map(average, 265, 137, 33.0 * 10.0, 53.0 * 10.0) / 10.0;
-  }
+    // 33 - 265
+    // 35 - 247
+    // 36 - 238
+    // 38 - 220
+    // 42 - 195
+    // 48 - 156
+    // 53 - 137
+    if (average <= 156 && average >= 137) {
+        currentTemp = map(average, 156, 137, 48 * 10.0, 53 * 10) / 10.0;
+    } else if (average <= 195) {
+        currentTemp = map(average, 195, 156, 42 * 10.0, 48 * 10) / 10.0;
+    } else if (average <= 220) {
+        currentTemp = map(average, 220, 195, 38 * 10.0, 42 * 10) / 10.0;
+    } else if (average <= 238) {
+        currentTemp = map(average, 238, 220, 36 * 10.0, 38 * 10) / 10.0;
+    } else if (average <= 247) {
+        currentTemp = map(average, 247, 238, 35 * 10.0, 36 * 10) / 10.0;
+    } else if (average <= 265) {
+        currentTemp = map(average, 265, 247, 33 * 10.0, 35 * 10) / 10.0;
+    } else {
+        currentTemp = map(average, 265, 137, 33.0 * 10.0, 53.0 * 10.0) / 10.0;
+    }
 
-  //  currentTemp = map(average, 247, 137, 35.0, 53.0);
+    //  currentTemp = map(average, 247, 137, 35.0, 53.0);
 }
 
 void checkIfBoilerOnline() {
-  uint8_t i;
+    uint8_t i;
 
-  bool tempOnline = false;
-  for (i = 0; i < boilerOnlineArrayCount; i++) {
-    if (digitalRead(boilerPin) == HIGH) {
-      tempOnline = true;
+    bool tempOnline = false;
+    for (i = 0; i < boilerOnlineArrayCount; i++) {
+        if (digitalRead(boilerPin) == HIGH) {
+            tempOnline = true;
+        }
+        delay(10);
     }
-    delay(10);
-  }
-  if (isBoilerOnline != tempOnline) {
-    isBoilerOnlinePrevious = isBoilerOnline;
-    isBoilerOnline = tempOnline;
-    boilerOnTime = millis();
-  }
-  if (!isBoilerOnline) {
-    previousTemp = 0.0;
-  }
+    if (isBoilerOnline != tempOnline) {
+        isBoilerOnlinePrevious = isBoilerOnline;
+        isBoilerOnline = tempOnline;
+        EEPROM.put(isOnlineBeforeResetAdress, isBoilerOnline);
+        boilerOnTime = millis();
+    }
+    if (!isBoilerOnline) {
+        previousTemp = 0.0;
+    }
 }
 
 void watchdogSetup(void) {
-  cli(); // disable all interrupts
-  wdt_reset(); // reset the WDT timer
-  /*
-    WDTCSR configuration:
-    WDIE = 1: Interrupt Enable
-    WDE = 1 :Reset Enable
-    WDP3 = 0 :For 2000ms Time-out
-    WDP2 = 1 :For 2000ms Time-out
-    WDP1 = 1 :For 2000ms Time-out
-    WDP0 = 1 :For 2000ms Time-out
-  */
-  // Enter Watchdog Configuration mode:
-  WDTCSR |= (1 << WDCE) | (1 << WDE);
-  //    WDTCSR |= (1 << WDE);
-  // Set Watchdog settings:
-  WDTCSR = (0 << WDIE) | (1 << WDE) | (0 << WDP3) | (1 << WDP2) | (1 << WDP1) | (1 << WDP0);
-  sei();
+    cli(); // disable all interrupts
+    wdt_reset(); // reset the WDT timer
+    /*
+      WDTCSR configuration:
+      WDIE = 1: Interrupt Enable
+      WDE = 1 :Reset Enable
+      WDP3 = 0 :For 2000ms Time-out
+      WDP2 = 1 :For 2000ms Time-out
+      WDP1 = 1 :For 2000ms Time-out
+      WDP0 = 1 :For 2000ms Time-out
+    */
+    // Enter Watchdog Configuration mode:
+    WDTCSR |= (1 << WDCE) | (1 << WDE);
+    //    WDTCSR |= (1 << WDE);
+    // Set Watchdog settings:
+    WDTCSR = (0 << WDIE) | (1 << WDE) | (0 << WDP3) | (1 << WDP2) | (1 << WDP1) | (1 << WDP0);
+    sei();
 }
 
-void setup()
-{
+void setup() {
+    while (!Serial) {; // wait for serial port to connect. Needed for native USB port only
+    }
 
-  pinMode(lcd1Light, OUTPUT);
-  pinMode(boilerPin, INPUT);
+    pinMode(lcd1Light, OUTPUT);
+    pinMode(boilerPin, INPUT);
 
-  temperatureAdjustingThread.onRun(adjustTemperature);
-  temperatureAdjustingThread.setInterval(5000);
+    temperatureAdjustingThread.onRun(adjustTemperature);
+    temperatureAdjustingThread.setInterval(5000);
 
-  getCurrentTemperatureThread.onRun(getTemperature);
-  getCurrentTemperatureThread.setInterval(500);
+    getCurrentTemperatureThread.onRun(getTemperature);
+    getCurrentTemperatureThread.setInterval(500);
 
-  boilerOnlineThread.onRun(checkIfBoilerOnline);
-  boilerOnlineThread.setInterval(2000);
+    boilerOnlineThread.onRun(checkIfBoilerOnline);
+    boilerOnlineThread.setInterval(2000);
 
-  lightUpThread.onRun(lightUp);
-  lightUpThread.setInterval(1);
+    lightUpThread.onRun(lightUp);
+    lightUpThread.setInterval(1);
 
-  lightDownThread.onRun(lightDown);
-  lightDownThread.setInterval(1);
+    lightDownThread.onRun(lightDown);
+    lightDownThread.setInterval(1);
 
-  lcd.begin(16, 2);
-  analogWrite(lcd1Light, maxLevel);
 
-  Serial.begin(9600);
-  servo.attach(servoPin);
-  isServoAttached = true;
-  servoAngle = minAngle;
-  servo.write(servoAngle);
-  delay(2000);
-  servoAngle = startAngle;
-  servo.write(servoAngle);
-  lastActionTime = millis();
-  watchdogSetup();
+    lcd.begin(16, 2);
+    analogWrite(lcd1Light, maxLevel);
+
+    Serial.begin(9600);
+    servo.attach(servoPin);
+    isServoAttached = true;
+    delay(2000);
+
+//    EEPROM.put(currentAngleAdress, 115);
+//    EEPROM.put(targetTempAdress, 36.0f);
+//    EEPROM.put(isOnlineBeforeResetAdress, 0);
+
+    double savedTargetTemp = 0.0f;
+    EEPROM.get(targetTempAdress, savedTargetTemp);
+    targetTemp = savedTargetTemp;
+    int savedAngle = 0;
+    EEPROM.get(currentAngleAdress, savedAngle);
+    servoAngle = savedAngle;
+
+    servo.write(servoAngle);
+    lastActionTime = millis();
+    watchdogSetup();
 }
 
 //ISR(WDT_vect) // Watchdog timer interrupt. {
@@ -344,131 +369,136 @@ void setup()
 // prevent a reset.
 //}
 
-void loop()
-{
-  //  loop_count++;
-  wdt_reset();
+void loop() {
+    //  loop_count++;
+    wdt_reset();
 
-  if ((millis() - lastActionTime > lcdSleepDelay) /*&& (currentLcdState == lcdWait || currentLcdState == lcdDown)*/) {
-    if (lightDownThread.shouldRun()) {
-      lightDownThread.run();
+    if ((millis() - lastActionTime > lcdSleepDelay) /*&& (currentLcdState == lcdWait || currentLcdState == lcdDown)*/) {
+        if (lightDownThread.shouldRun()) {
+            lightDownThread.run();
+        }
+
+        if (isServoAttached) {
+            servo.detach();
+            isServoAttached = false;
+        }
+    } else if ((millis() - lastActionTime < lcdSleepDelay) /*&& (currentLcdState == lcdWait || currentLcdState == lcdUp)*/) {
+        if (lightUpThread.shouldRun()) {
+            lightUpThread.run();
+        }
+
+        if (!isServoAttached) {
+            servo.attach(servoPin);
+            isServoAttached = true;
+        }
     }
 
-    if (isServoAttached) {
-      servo.detach();
-      isServoAttached = false;
-    }
-  } else if ((millis() - lastActionTime < lcdSleepDelay) /*&& (currentLcdState == lcdWait || currentLcdState == lcdUp)*/) {
-    if (lightUpThread.shouldRun()) {
-      lightUpThread.run();
+    if (!isBoilerOnline) {
+        currentServoState = none;
+    } else {
+        lastActionTime = millis();
     }
 
-    if (!isServoAttached) {
-      servo.attach(servoPin);
-      isServoAttached = true;
-    }
-  }
+    if (temperatureAdjustingThread.shouldRun() && isBoilerOnline)
+        temperatureAdjustingThread.run();
 
-  if (!isBoilerOnline) {
-    currentServoState = none;
-  } else {
-    lastActionTime = millis();
-  }
+    if (getCurrentTemperatureThread.shouldRun())
+        getCurrentTemperatureThread.run();
 
-  if (temperatureAdjustingThread.shouldRun() && isBoilerOnline == true)
-    temperatureAdjustingThread.run();
+    if (boilerOnlineThread.shouldRun())
+        boilerOnlineThread.run();
 
-  if (getCurrentTemperatureThread.shouldRun())
-    getCurrentTemperatureThread.run();
+    printToLcd1();
 
-  if (boilerOnlineThread.shouldRun())
-    boilerOnlineThread.run();
+    char key = kpd.getKey();
 
-  printToLcd1();
-
-  char key = kpd.getKey();
-
-  if (key) // Check for a valid key.
-  {
-    switch (key)
+    if (key) // Check for a valid key.
     {
-      case '+':
-        if (targetTemp < maxTemp)
-          targetTemp += 1;
-        lastActionTime = millis();
-        break;
+        switch (key) {
+            case '-':
+                if (targetTemp > minTemp)
+                    targetTemp -= 1;
 
-      case '-':
-        if (targetTemp > minTemp)
-          targetTemp -= 1;
+                lastActionTime = millis();
+                EEPROM.put(targetTempAdress, targetTemp);
+                break;
 
-        lastActionTime = millis();
-        break;
+            case '+':
+                if (targetTemp < maxTemp)
+                    targetTemp += 1;
+                lastActionTime = millis();
+                EEPROM.put(targetTempAdress, targetTemp);
+                break;
 
-      default:
-        lastActionTime = millis();
-        break;
+            case 'B':
+                resetFunc();
+                lastActionTime = millis();
+                break;
+
+            case 'A':
+                lcd.clear();
+                lastActionTime = millis();
+                break;
+        }
     }
-  }
+
+    double savedTargetTemp = 0.0f;
+    EEPROM.get(targetTempAdress, savedTargetTemp);
 }
 
 
 void printToLcd1() {
-  String boiler = " ON ";
+    String boiler = " ON ";
 
-  String emptyLeft = "      ";
-  String emptyRight = "      ";
+    String emptyLeft = "      ";
+    String emptyRight = "      ";
 
-  String waitLeft = "    = ";
-  String waitRight = " =    ";
+    String waitLeft = "    = ";
+    String waitRight = " =    ";
 
-  String goLeft = "    ->";
-  String goRight = "<-    ";
+    String goLeft = "    ->";
+    String goRight = "<-    ";
 
-  String pausedLeft = "  ||->";
-  String pausedRight = "<-||  ";
+    String pausedLeft = "  ||->";
+    String pausedRight = "<-||  ";
 
-  lcd.home ();
-  String targetTempString;
+    lcd.home();
+    String targetTempString;
 
-  //  if (currentFineAdjusting> maxFineAdjustingCount) {
-  //    targetTempString = " " + String((int)targetTemp) + " ";
-  //  } else
-  if (currentSkip > 0 && currentSkip <= maxSkipCount) {
-    targetTempString = "_" + String((int)targetTemp) + "_";
-  } else {
-    targetTempString = " " + String((int)targetTemp) + " ";
-    //  } else if (currentSkip > 0 && currentSkip <= maxSkipCount) {
+    if (currentSkip > 0 && currentSkip <= maxSkipCount) {
+        targetTempString = "_" + String((int) targetTemp) + "_";
+    } else {
+        targetTempString = " " + String((int) targetTemp) + " ";
 
-  }
+    }
 
-  switch (currentServoState) {
-    case none:
-      lcd.print(waitLeft + targetTempString + waitRight);
-      break;
+    switch (currentServoState) {
+        case none:
+            lcd.print(waitLeft + targetTempString + waitRight);
+            break;
 
-    case up:
-      if (isCycleSkipped) {
-        lcd.print(pausedLeft + targetTempString + emptyRight);
-      } else {
-        lcd.print(goLeft + targetTempString + emptyRight);
-      }
-      break;
+        case up:
+            if (isCycleSkipped) {
+                lcd.print(pausedLeft + targetTempString + emptyRight);
+            } else {
+                lcd.print(goLeft + targetTempString + emptyRight);
+            }
+            break;
 
-    case down:
-      if (isCycleSkipped) {
-        lcd.print(emptyLeft + targetTempString + pausedRight);
-      } else {
-        lcd.print(emptyLeft + targetTempString + goRight);
-      }
-      break;
-  }
+        case down:
+            if (isCycleSkipped) {
+                lcd.print(emptyLeft + targetTempString + pausedRight);
+            } else {
+                lcd.print(emptyLeft + targetTempString + goRight);
+            }
+            break;
+    }
 
   if (!isBoilerOnline) {
     boiler = " OFF";
   }
-  lcd.setCursor ( 0, 1 );        // go to the next line
-  lcd.print (String(currentTemp) + " " + String(millis() / 1000 / 60 / 60)  + " " + String(180 - servoAngle) + boiler);
+    lcd.setCursor(0, 1);        // go to the next line
+    lcd.print(String(currentTemp) + " " + String(millis() / 1000 / 60 / 60) + " " + String(180 - servoAngle) + boiler);
 }
 
 
