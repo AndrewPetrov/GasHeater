@@ -330,7 +330,7 @@ void setup()
   servoAngle = minAngle;
   servo.write(servoAngle);
   delay(2000);
-  servoAngle = startAngle;
+    servoAngle = startAngle;
   servo.write(servoAngle);
   lastActionTime = millis();
   watchdogSetup();
@@ -413,37 +413,51 @@ void loop()
 void printToLcd1() {
   String boiler = " ON ";
 
-  String emptyLeft = "       ";
-  String emptyRight = "       ";
+  String emptyLeft = "      ";
+  String emptyRight = "      ";
 
-  String waitLeft = "    =  ";
-  String waitRight = "  =    ";
+  String waitLeft = "    = ";
+  String waitRight = " =    ";
 
-  String goLeft = "    -> ";
-  String goRight = " <-    ";
+  String goLeft = "    ->";
+  String goRight = "<-    ";
 
-  String pausedLeft = "  ||-> ";
-  String pausedRight = " <-||  ";
+  String pausedLeft = "  ||->";
+  String pausedRight = "<-||  ";
 
   lcd.home ();
+  String targetTempString;
+
+  //  if (currentFineAdjusting> maxFineAdjustingCount) {
+  //    targetTempString = " " + String((int)targetTemp) + " ";
+  //  } else
+  if (currentSkip > 0 && currentSkip <= maxSkipCount) {
+    targetTempString = "_" + String((int)targetTemp) + "_";
+  } else {
+    targetTempString = " " + String((int)targetTemp) + " ";
+    //  } else if (currentSkip > 0 && currentSkip <= maxSkipCount) {
+
+  }
+
+  lcd.clear();
   switch (currentServoState) {
     case none:
-      lcd.print(waitLeft + String((int)targetTemp) + waitRight);
+      lcd.print(waitLeft + targetTempString + waitRight);
       break;
 
     case up:
       if (isCycleSkipped) {
-        lcd.print(pausedLeft + String((int)targetTemp) + emptyRight);
+        lcd.print(pausedLeft + targetTempString + emptyRight);
       } else {
-        lcd.print(goLeft + String((int)targetTemp) + emptyRight);
+        lcd.print(goLeft + targetTempString + emptyRight);
       }
       break;
 
     case down:
       if (isCycleSkipped) {
-        lcd.print(emptyLeft + String((int)targetTemp) + pausedRight);
+        lcd.print(emptyLeft + targetTempString + pausedRight);
       } else {
-        lcd.print(emptyLeft + String((int)targetTemp) + goRight);
+        lcd.print(emptyLeft + targetTempString + goRight);
       }
       break;
   }
@@ -452,7 +466,6 @@ void printToLcd1() {
     boiler = " OFF";
   }
   lcd.setCursor ( 0, 1 );        // go to the next line
-  //  lcd.print (String(currentTemp) + " "   " + String(180 - servoAngle) + boiler);
   lcd.print (String(currentTemp) + " " + String(millis() / 1000 / 60 / 60)  + " " + String(180 - servoAngle) + boiler);
 }
 
