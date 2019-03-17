@@ -20,7 +20,6 @@
 // the value of the 'other' resistor
 #define SERIESRESISTOR 97000
 
-//int loop_count = 0;
 
 #define lcd1Light DD3
 LiquidCrystal_I2C lcd(0x3F, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
@@ -49,7 +48,7 @@ char keys[ROWS][COLS] = {
 
 bool isBoilerOnline = false;
 bool isBoilerOnlinePrevious = false;
-#define boilerOnlineArrayCount 5
+#define boilerOnlineArrayCount 100
 unsigned long boilerOnTime;
 unsigned long boilerStartDelay = 12000;
 
@@ -68,6 +67,10 @@ int servoAngle = minAngle;   // servo position in degrees
 bool isServoAttached = false;
 bool isCycleSkipped = false;
 
+const int maxFineAdjustingCount = 4;
+int currentFineAdjusting = 0;
+const int maxSkipCount = 5;
+int currentSkip = 0;
 enum servoState {
   none,
   up,
@@ -76,12 +79,10 @@ enum servoState {
 
 servoState currentServoState = none;
 
-//bool isServoWorks = false;
-//bool isDecreasingGas = false;
 
 double maxTemp = 50.0;
 double minTemp = 20.0;
-double targetTemp = 36.0;
+double targetTemp = 35.0;
 double currentTemp = 25.0;
 double threshold = 1.0;
 double previousTemp = 0.0;
@@ -115,23 +116,29 @@ void lightDown() {
 void adjustTemperature() {
   if (millis() - boilerOnTime < boilerStartDelay) {
     currentServoState = none;
+    currentFineAdjusting = 0;
+    currentSkip = 0;
+
     return;
   }
-  //  currentServoState = none;
   isCycleSkipped = false;
   if (currentTemp > (targetTemp + threshold) && servoAngle < minAngle) {
     int delta = 1;
-    if ((currentTemp + threshold - targetTemp) > 2) {
+    if ((currentTemp - threshold - targetTemp) > 2) {
       delta = 2;
     }
-    if ((currentTemp + threshold - targetTemp) > 4) {
+    if ((currentTemp - threshold - targetTemp) > 4) {
       delta = 3;
     }
-    if ((currentTemp + threshold - targetTemp) > 6) {
+    if ((currentTemp - threshold - targetTemp) > 6) {
       delta = 4;
     }
-    if ((currentTemp + threshold - targetTemp) > 9) {
+    if ((currentTemp - threshold - targetTemp) > 9) {
       delta = 5;
+    }
+
+    if (checkIfNeedToSkip(delta)) {
+      return;
     }
 
     if (
@@ -145,6 +152,7 @@ void adjustTemperature() {
       isCycleSkipped = false;
     }
     previousTemp = currentTemp;
+    Serial.println(-delta);
     servoAngle += delta;
     currentServoState = down;
   }
@@ -162,6 +170,9 @@ void adjustTemperature() {
     }
     if ((currentTemp + threshold - targetTemp) < -9) {
       delta = 5;
+    }
+    if (checkIfNeedToSkip(delta)) {
+      return;
     }
 
     if (
@@ -281,7 +292,7 @@ void setup()
   getCurrentTemperatureThread.setInterval(500);
 
   boilerOnlineThread.onRun(checkIfBoilerOnline);
-  boilerOnlineThread.setInterval(200);
+  boilerOnlineThread.setInterval(2000);
 
   lightUpThread.onRun(lightUp);
   lightUpThread.setInterval(1);
