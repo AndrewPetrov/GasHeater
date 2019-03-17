@@ -187,11 +187,32 @@ void adjustTemperature() {
     }
     previousTemp = currentTemp;
     servoAngle -= delta;
+    Serial.println(delta);
     currentServoState = up;
   } else {
     currentServoState = none;
+    currentFineAdjusting = 0;
+    currentSkip = 0;
   }
   servo.write(servoAngle);
+bool checkIfNeedToSkip(int delta) {
+  if (delta == 1) {
+    currentFineAdjusting++;
+  } else {
+    currentFineAdjusting = 0;
+  }
+
+  if (currentFineAdjusting > maxFineAdjustingCount) {
+    currentSkip++;
+    if (currentSkip >= maxSkipCount) {
+      currentSkip = 0;
+      currentFineAdjusting = 0;
+      return false;
+    }
+    return true;
+  } else {
+    return false;
+  }
 }
 
 void getTemperature() {
