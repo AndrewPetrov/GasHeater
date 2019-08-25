@@ -38,6 +38,12 @@ enum lcdState {
 };
 lcdState currentLcdState = lcdWait;
 
+enum DrivingType {
+    automatic = 0,
+    manual = 1
+};
+
+DrivingType currentDrivingType = automatic;
 
 const byte ROWS = 1; // Four rows
 const byte COLS = 4; // Three columns
@@ -67,7 +73,7 @@ int servoPin = 7;
 
 int minAngle = 180;
 int startAngle = 120;
-int maxAngle = 90;
+int maxAngle = 60;
 int servoAngle = minAngle;   // servo position in degrees
 bool isServoAttached = false;
 bool isCycleSkipped = false;
@@ -78,10 +84,11 @@ const int maxSkipCount = 5;
 int currentSkip = 0;
 
 // writting to EEPROM
-int shift = 0;
+int shift = 30;
 int currentAngleAdress = shift;
 int isOnlineBeforeResetAdress = shift + 5;
 int targetTempAdress = shift + 10;
+int currentDrivingTypeAdress = shift + 15;
 
 enum servoState {
     none,
@@ -126,9 +133,11 @@ void lightDown() {
 }
 
 void adjustTemperature() {
+    if (currentDrivingType == manual) {
+        return;
+    };
     int isOnlineBeforeReset = 0;
     EEPROM.get(isOnlineBeforeResetAdress, isOnlineBeforeReset);
-
 
     if (millis() - boilerOnTime < boilerStartDelay && !isOnlineBeforeReset) {
         currentServoState = none;
@@ -165,7 +174,6 @@ void adjustTemperature() {
             isCycleSkipped = false;
         }
         previousTemp = currentTemp;
-        Serial.println(-delta);
         servoAngle += delta;
         currentServoState = down;
     } else if (currentTemp < (targetTemp - threshold) && servoAngle > maxAngle) {
@@ -278,14 +286,35 @@ void getTemperature() {
 
 void checkIfBoilerOnline() {
     uint8_t i;
+//    String resulsString = "";
+//
+//    bool tempOnline = true;
+//
+//    for (i = 0; i < boilerOnlineArrayCount; i++) {
+//        resulsString += digitalRead(boilerPin);
+//
+//        int aaa = digitalRead(boilerPin);
+//        Serial.println("___");
+//        Serial.print(aaa);
+//        delay(10);
+//    }
+//    if (resulsString.indexOf("0000000000000000000000000000000000") >= 0) {
+//        tempOnline = false;
+//    }
 
     bool tempOnline = false;
     for (i = 0; i < boilerOnlineArrayCount; i++) {
-        if (digitalRead(boilerPin) == HIGH) {
+        int aaa = digitalRead(boilerPin);
+        Serial.print(aaa);
+
+        if (aaa == HIGH) {
             tempOnline = true;
         }
         delay(10);
     }
+    Serial.println("___");
+
+
     if (isBoilerOnline != tempOnline) {
         isBoilerOnlinePrevious = isBoilerOnline;
         isBoilerOnline = tempOnline;
@@ -348,9 +377,23 @@ void setup() {
     isServoAttached = true;
     delay(2000);
 
-//    EEPROM.put(currentAngleAdress, 115);
-//    EEPROM.put(targetTempAdress, 36.0f);
-//    EEPROM.put(isOnlineBeforeResetAdress, 0);
+    //initial setup
+/*
+    servo.write(minAngle);
+    delay(10000);
+
+    EEPROM.put(currentAngleAdress, 150);
+    EEPROM.put(targetTempAdress, 33.0f);
+    EEPROM.put(isOnlineBeforeResetAdress, 0);
+    EEPROM.put(currentDrivingTypeAdress, currentDrivingType);
+*/
+    // end
+
+    kpd.setHoldTime(1000);
+    kpd.addEventListener(keypadEvent);
+
+
+    EEPROM.get(currentDrivingTypeAdress, currentDrivingType);
 
     double savedTargetTemp = 0.0f;
     EEPROM.get(targetTempAdress, savedTargetTemp);
@@ -368,6 +411,74 @@ void setup() {
 // Include your code here - be careful not to use functions they may cause the interrupt to hang and
 // prevent a reset.
 //}
+void keypadEvent(KeypadEvent key) {
+    int const smallDelta = 1;
+    int const bigDelta = 5;
+
+    if (key) // Check for a valid key.
+    {
+        switch (key) {
+            case '-':
+                switch (currentDrivingType) {
+                    case automatic:
+                        if (targetTemp > minTemp)
+                            targetTemp -= 1;
+
+                        lastActionTime = millis();
+                        EEPROM.put(targetTempAdress, targetTemp);
+
+                    case manual:
+                        if (kpd.getState() == HOLD && servoAngle + bigDelta <= maxAngle) {
+                            servoAngle += bigDelta;
+                        } else if (kpd.getState() == PRESSED && servoAngle + smallDelta <= maxAngle) {
+                            servoAngle += smallDelta;
+                        }
+                        servo.write(servoAngle);
+                        EEPROM.update(currentAngleAdress, servoAngle);
+                }
+                break;
+
+            case '+':
+                switch (currentDrivingType) {
+                    case automatic:
+                        if (targetTemp < maxTemp)
+                            targetTemp += 1;
+                        lastActionTime = millis();
+                        EEPROM.put(targetTempAdress, targetTemp);
+
+                    case manual:
+                        if (kpd.getState() == HOLD && servoAngle - bigDelta >= minAngle) {
+                            servoAngle -= bigDelta;
+                        } else if (kpd.getState() == PRESSED && servoAngle - smallDelta >= minAngle) {
+                            servoAngle -= smallDelta;
+                        }
+                        servo.write(servoAngle);
+                        EEPROM.update(currentAngleAdress, servoAngle);
+                }
+                break;
+
+            case 'B':
+                resetFunc();
+                lastActionTime = millis();
+                break;
+
+            case 'A':
+                if (kpd.getState() == HOLD) {
+                    return;
+                }
+                if (currentDrivingType == automatic) {
+                    currentDrivingType = manual;
+                } else {
+                    currentDrivingType = automatic;
+                };
+                EEPROM.update(currentDrivingTypeAdress, currentDrivingType);
+
+                lcd.clear();
+                lastActionTime = millis();
+                break;
+        }
+    }
+}
 
 void loop() {
     //  loop_count++;
@@ -410,36 +521,11 @@ void loop() {
 
     printToLcd1();
 
+
     char key = kpd.getKey();
 
-    if (key) // Check for a valid key.
-    {
-        switch (key) {
-            case '-':
-                if (targetTemp > minTemp)
-                    targetTemp -= 1;
-
-                lastActionTime = millis();
-                EEPROM.put(targetTempAdress, targetTemp);
-                break;
-
-            case '+':
-                if (targetTemp < maxTemp)
-                    targetTemp += 1;
-                lastActionTime = millis();
-                EEPROM.put(targetTempAdress, targetTemp);
-                break;
-
-            case 'B':
-                resetFunc();
-                lastActionTime = millis();
-                break;
-
-            case 'A':
-                lcd.clear();
-                lastActionTime = millis();
-                break;
-        }
+    if (key) {
+        Serial.println(key);
     }
 
     double savedTargetTemp = 0.0f;
@@ -449,9 +535,15 @@ void loop() {
 
 void printToLcd1() {
     String boiler = " ON ";
+    if (!isBoilerOnline) {
+        boiler = " OFF";
+    }
 
     String emptyLeft = "      ";
     String emptyRight = "      ";
+
+    String manualLeft = "||>>   ";
+    String manualRight = "   <<||";
 
     String waitLeft = "    = ";
     String waitRight = " =    ";
@@ -462,43 +554,59 @@ void printToLcd1() {
     String pausedLeft = "  ||->";
     String pausedRight = "<-||  ";
 
-    lcd.home();
     String targetTempString;
+    String timeOnline = String(millis() / 1000 / 60 / 60);
+    String currentTempString = String(currentTemp);
+    String currentAngleString = String(180 - servoAngle);
 
-    if (currentSkip > 0 && currentSkip <= maxSkipCount) {
-        targetTempString = "_" + String((int) targetTemp) + "_";
-    } else {
-        targetTempString = " " + String((int) targetTemp) + " ";
+    lcd.home();
 
+    switch (currentDrivingType) {
+        case automatic:
+            if (currentSkip > 0 && currentSkip <= maxSkipCount) {
+                targetTempString = "_" + String((int) targetTemp) + "_";
+            } else {
+                targetTempString = " " + String((int) targetTemp) + " ";
+            }
+
+            switch (currentServoState) {
+                case none:
+                    lcd.print(waitLeft + targetTempString + waitRight);
+                    break;
+
+                case up:
+                    if (isCycleSkipped) {
+                        lcd.print(pausedLeft + targetTempString + emptyRight);
+                    } else {
+                        lcd.print(goLeft + targetTempString + emptyRight);
+                    }
+                    break;
+
+                case down:
+                    if (isCycleSkipped) {
+                        lcd.print(emptyLeft + targetTempString + pausedRight);
+                    } else {
+                        lcd.print(emptyLeft + targetTempString + goRight);
+                    }
+                    break;
+            }
+
+            lcd.setCursor(0, 1);        // go to the next line
+            lcd.print(currentTempString + " " + timeOnline + " " + currentAngleString + boiler);
+            break;
+
+        case manual:
+            int neededSpacesCount = 16 - manualLeft.length() - currentAngleString.length() - manualRight.length();
+            String spases = "";
+            for (int i = 0; i < neededSpacesCount; ++i) {
+                spases += " ";
+            }
+            lcd.print(manualLeft + currentAngleString + spases + manualRight);
+            lcd.setCursor(0, 1);        // go to the next line
+            lcd.print(currentTempString + " " + timeOnline + " " + boiler + "     ");
+            break;
     }
 
-    switch (currentServoState) {
-        case none:
-            lcd.print(waitLeft + targetTempString + waitRight);
-            break;
-
-        case up:
-            if (isCycleSkipped) {
-                lcd.print(pausedLeft + targetTempString + emptyRight);
-            } else {
-                lcd.print(goLeft + targetTempString + emptyRight);
-            }
-            break;
-
-        case down:
-            if (isCycleSkipped) {
-                lcd.print(emptyLeft + targetTempString + pausedRight);
-            } else {
-                lcd.print(emptyLeft + targetTempString + goRight);
-            }
-            break;
-    }
-
-  if (!isBoilerOnline) {
-    boiler = " OFF";
-  }
-    lcd.setCursor(0, 1);        // go to the next line
-    lcd.print(String(currentTemp) + " " + String(millis() / 1000 / 60 / 60) + " " + String(180 - servoAngle) + boiler);
 }
 
 
