@@ -390,6 +390,7 @@ void setup() {
     // end
 
     kpd.setHoldTime(1000);
+    kpd.setDebounceTime(500);
     kpd.addEventListener(keypadEvent);
 
 
@@ -421,39 +422,49 @@ void keypadEvent(KeypadEvent key) {
             case '-':
                 switch (currentDrivingType) {
                     case automatic:
+                        if (kpd.getState() == HOLD) {
+                            return;
+                        }
                         if (targetTemp > minTemp)
                             targetTemp -= 1;
 
                         lastActionTime = millis();
                         EEPROM.put(targetTempAdress, targetTemp);
+                        break;
 
                     case manual:
-                        if (kpd.getState() == HOLD && servoAngle + bigDelta <= maxAngle) {
+                        if (kpd.getState() == HOLD && servoAngle + bigDelta <= minAngle) {
                             servoAngle += bigDelta;
-                        } else if (kpd.getState() == PRESSED && servoAngle + smallDelta <= maxAngle) {
+                        } else if (kpd.getState() == PRESSED && servoAngle + smallDelta <= minAngle) {
                             servoAngle += smallDelta;
                         }
                         servo.write(servoAngle);
                         EEPROM.update(currentAngleAdress, servoAngle);
+                        break;
                 }
                 break;
 
             case '+':
                 switch (currentDrivingType) {
                     case automatic:
+                        if (kpd.getState() == HOLD) {
+                            return;
+                        }
                         if (targetTemp < maxTemp)
                             targetTemp += 1;
                         lastActionTime = millis();
                         EEPROM.put(targetTempAdress, targetTemp);
+                        break;
 
                     case manual:
-                        if (kpd.getState() == HOLD && servoAngle - bigDelta >= minAngle) {
+                        if (kpd.getState() == HOLD && servoAngle - bigDelta >= maxAngle) {
                             servoAngle -= bigDelta;
-                        } else if (kpd.getState() == PRESSED && servoAngle - smallDelta >= minAngle) {
+                        } else if (kpd.getState() == PRESSED && servoAngle - smallDelta >= maxAngle) {
                             servoAngle -= smallDelta;
                         }
                         servo.write(servoAngle);
                         EEPROM.update(currentAngleAdress, servoAngle);
+                        break;
                 }
                 break;
 
