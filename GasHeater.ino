@@ -296,8 +296,8 @@ void checkIfBoilerOnline() {
     int aaa = digitalRead(boilerPin);
     delay(10);
   }
-//  Serial.print(resulsString);
-//  Serial.println("___");
+  Serial.print(resulsString);
+  Serial.println("___");
   if (resulsString.indexOf("00000000000000000000") >= 0) {
     tempOnline = false;
   }
@@ -377,9 +377,9 @@ void setup() {
   */
   // end
 
-  kpd.setHoldTime(1000);
-  kpd.setDebounceTime(500);
-  //    kpd.addEventListener(keypadEvent);
+  kpd.setHoldTime(500);
+  kpd.setDebounceTime(50);
+  kpd.addEventListener(keypadEvent);
 
 
   EEPROM.get(currentDrivingTypeAdress, currentDrivingType);
@@ -387,7 +387,7 @@ void setup() {
   double savedTargetTemp = 0.0f;
   EEPROM.get(targetTempAdress, savedTargetTemp);
   targetTemp = savedTargetTemp;
-  int savedAngle = 0;
+  int savedAngle = 150;
   EEPROM.get(currentAngleAdress, savedAngle);
   servoAngle = savedAngle;
 
@@ -401,21 +401,21 @@ void setup() {
 // prevent a reset.
 //}
 void keypadEvent(KeypadEvent key) {
+
+  Serial.print(kpd.getState());
+  Serial.println(key);
+
   int const smallDelta = 1;
   int const bigDelta = 5;
-
+  lastActionTime = millis();
   switch (key) {
     case '-':
       switch (currentDrivingType) {
         case automatic:
-                                  if (kpd.getState() == HOLD) {
-                                      return;
-                                  }
-          if (targetTemp > minTemp)
+          if (kpd.getState() == PRESSED && targetTemp > minTemp) {
             targetTemp -= 1;
-
-          lastActionTime = millis();
-          EEPROM.put(targetTempAdress, targetTemp);
+            EEPROM.put(targetTempAdress, targetTemp);
+          }
           break;
 
         case manual:
@@ -428,18 +428,15 @@ void keypadEvent(KeypadEvent key) {
           EEPROM.update(currentAngleAdress, servoAngle);
           break;
       }
-                    break;
+      break;
 
     case '+':
       switch (currentDrivingType) {
         case automatic:
-                                  if (kpd.getState() == HOLD) {
-                                      return;
-                                  }
-          if (targetTemp < maxTemp)
+          if (kpd.getState() == PRESSED && targetTemp < maxTemp) {
             targetTemp += 1;
-          lastActionTime = millis();
-          EEPROM.put(targetTempAdress, targetTemp);
+            EEPROM.put(targetTempAdress, targetTemp);
+          }
           break;
 
         case manual:
@@ -452,26 +449,31 @@ void keypadEvent(KeypadEvent key) {
           EEPROM.update(currentAngleAdress, servoAngle);
           break;
       }
-                    break;
+      break;
 
     case 'B':
-      resetFunc();
-      lastActionTime = millis();
+      if (kpd.getState() == PRESSED) {
+        resetFunc();
+      }
       break;
 
     case 'A':
-      if (kpd.getState() == HOLD) {
-        return;
-      }
-      if (currentDrivingType == automatic) {
-        currentDrivingType = manual;
-      } else {
-        currentDrivingType = automatic;
-      };
-      EEPROM.update(currentDrivingTypeAdress, currentDrivingType);
+      if (kpd.getState() == PRESSED) {
+        if (currentDrivingType == automatic) {
+          currentDrivingType = manual;
+        } else {
+          currentDrivingType = automatic;
+        };
+        EEPROM.update(currentDrivingTypeAdress, currentDrivingType);
 
-      lcd.clear();
-      lastActionTime = millis();
+        lcd.clear();
+      } else if (currentDrivingType == manual && kpd.getState() == HOLD) {
+        currentDrivingType = automatic;
+        EEPROM.update(currentDrivingTypeAdress, currentDrivingType);
+        servoAngle = 130;
+        EEPROM.update(currentAngleAdress, servoAngle);
+        servo.write(servoAngle);
+      }
       break;
   }
 
@@ -521,11 +523,9 @@ void loop() {
 
   char key = kpd.getKey();
 
-  if (key) {
-//    Serial.print(key);
-//    Serial.println(kpd.getState());
-    keypadEvent(key);
-  }
+  //  if (key) {
+  //    keypadEvent(key);
+  //  }
 
   double savedTargetTemp = 0.0f;
   EEPROM.get(targetTempAdress, savedTargetTemp);
