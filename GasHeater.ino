@@ -470,7 +470,7 @@ void keypadEvent(KeypadEvent key) {
       } else if (currentDrivingType == manual && kpd.getState() == HOLD) {
         currentDrivingType = automatic;
         EEPROM.update(currentDrivingTypeAdress, currentDrivingType);
-        servoAngle = 130;
+        servoAngle = 120;
         EEPROM.update(currentAngleAdress, servoAngle);
         servo.write(servoAngle);
       }
